@@ -1,0 +1,161 @@
+blueprint:
+  name: Hue Dimmer V2 - Scene & Brightness Control
+  description: >-
+    Control a dimmable light (or group) with a Philips Hue Dimmer Switch V2
+    paired via zigbee2mqtt.
+
+    Behavior:
+    - Top (On) button: toggle light on/off (restores previous state)
+    - Dim up (+): increase brightness by 10 percentage points
+    - Dim down (-): decrease brightness by 10 percentage points
+    - Bottom (Off) button: cycle through 5 scenes
+      (concentrate → bright → relax → dimmed → nightlight → concentrate …)
+
+    Requires an input_select helper per room with exactly these options:
+    concentrate, bright, relax, dimmed, nightlight
+  domain: automation
+  source_url: https://github.com/isama92/ha-blueprints/blob/main/hue_dimmer_scene_control.yaml
+  input:
+    dimmer_topic:
+      name: Dimmer MQTT topic
+      description: >-
+        Full zigbee2mqtt topic for the dimmer, e.g. "zigbee2mqtt/office_dimmer".
+        Change only the friendly name at the end.
+      default: "zigbee2mqtt/"
+      selector:
+        text:
+    light_target:
+      name: Light or light group
+      description: The light (or z2m group) this dimmer controls.
+      selector:
+        entity:
+          domain: light
+    scene_helper:
+      name: Scene selector helper
+      description: >-
+        An input_select helper that tracks which scene is active.
+        Must have options: concentrate, bright, relax, dimmed, nightlight.
+      selector:
+        entity:
+          domain: input_select
+
+mode: restart
+max_exceeded: silent
+
+variables:
+  light_entity: !input light_target
+  scene_helper_entity: !input scene_helper
+  scenes:
+    concentrate:
+      brightness_pct: 100
+      color_temp_kelvin: 4300
+    bright:
+      brightness_pct: 100
+      color_temp_kelvin: 6500
+    relax:
+      brightness_pct: 55
+      color_temp_kelvin: 2500
+    dimmed:
+      brightness_pct: 25
+      color_temp_kelvin: 2250
+    nightlight:
+      brightness_pct: 1
+      color_temp_kelvin: 2250
+
+trigger:
+  - platform: mqtt
+    topic: !input dimmer_topic
+    value_template: "{{ value_json.action }}"
+    payload: on_press_release
+    id: top_toggle
+  - platform: mqtt
+    topic: !input dimmer_topic
+    value_template: "{{ value_json.action }}"
+    payload: up_press_release
+    id: dim_up
+  - platform: mqtt
+    topic: !input dimmer_topic
+    value_template: "{{ value_json.action }}"
+    payload: down_press_release
+    id: dim_down
+  - platform: mqtt
+    topic: !input dimmer_topic
+    value_template: "{{ value_json.action }}"
+    payload: off_press_release
+    id: scene_cycle
+
+action:
+  - choose:
+      # ── Top button: toggle ───────────────────────────────
+      - conditions:
+          - condition: trigger
+            id: top_toggle
+        sequence:
+          - service: light.toggle
+            target:
+              entity_id: !input light_target
+
+      # ── Dim up: +10% ─────────────────────────────────────
+      - conditions:
+          - condition: trigger
+            id: dim_up
+          - condition: state
+            entity_id: !input light_target
+            state: "on"
+        sequence:
+          - service: light.turn_on
+            target:
+              entity_id: !input light_target
+            data:
+              brightness_step_pct: 10
+              transition: 0.3
+
+      # ── Dim down: -10% ───────────────────────────────────
+      - conditions:
+          - condition: trigger
+            id: dim_down
+          - condition: state
+            entity_id: !input light_target
+            state: "on"
+        sequence:
+          - service: light.turn_on
+            target:
+              entity_id: !input light_target
+            data:
+              brightness_step_pct: -10
+              transition: 0.3
+
+      # ── Bottom button: cycle to next scene ───────────────
+      - conditions:
+          - condition: trigger
+            id: scene_cycle
+        sequence:
+          - variables:
+              scene_order:
+                - concentrate
+                - bright
+                - relax
+                - dimmed
+                - nightlight
+              current: "{{ states(scene_helper_entity) }}"
+              next_index: >-
+                {% if current in scene_order %}
+                  {{ (scene_order.index(current) + 1) % (scene_order | count) }}
+                {% else %}
+                  0
+                {% endif %}
+              next_scene: "{{ scene_order[next_index] }}"
+              next_brightness: "{{ scenes[next_scene].brightness_pct }}"
+              next_kelvin: "{{ scenes[next_scene].color_temp_kelvin }}"
+          - service: input_select.select_option
+            target:
+              entity_id: !input scene_helper
+            data:
+              option: "{{ next_scene }}"
+          - service: light.turn_on
+            target:
+              entity_id: !input light_target
+            data:
+              brightness_pct: "{{ next_brightness }}"
+              color_temp_kelvin: "{{ next_kelvin }}"
+              transition: 0.5
