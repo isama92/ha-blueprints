@@ -1,5 +1,5 @@
 blueprint:
-  name: Hue Dimmer V2 - Scene & Brightness Control
+  name: Hue Dimmer - Scene & Brightness Control
   description: >-
     Control a dimmable light (or group) with a Philips Hue Dimmer Switch V2
     paired via zigbee2mqtt.
@@ -80,22 +80,22 @@ trigger:
   - platform: mqtt
     topic: !input dimmer_topic
     value_template: "{{ value_json.action }}"
-    payload: on_press_release
+    payload: on_press
     id: top_toggle
   - platform: mqtt
     topic: !input dimmer_topic
     value_template: "{{ value_json.action }}"
-    payload: up_press_release
+    payload: up_press
     id: dim_up
   - platform: mqtt
     topic: !input dimmer_topic
     value_template: "{{ value_json.action }}"
-    payload: down_press_release
+    payload: down_press
     id: dim_down
   - platform: mqtt
     topic: !input dimmer_topic
     value_template: "{{ value_json.action }}"
-    payload: off_press_release
+    payload: off_press
     id: scene_cycle
 
 action:
