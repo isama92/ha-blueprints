@@ -210,7 +210,9 @@ action:
                       topic: "{{ scene_base_topic }}/set"
                       payload: >-
                         {"scene_recall": {{ scene_ids[next_scene] }}}
-              # color bulbs → light.turn_on with explicit values
+              # color bulbs → two-step light.turn_on to avoid green flash
+              # (changing color and brightness together makes the xy path pass
+              # through green; splitting into sequential steps avoids it)
               - conditions:
                   - "{{ bulb_type_value == 'color' }}"
                 sequence:
@@ -218,6 +220,12 @@ action:
                     target:
                       entity_id: !input light_target
                     data:
-                      brightness_pct: "{{ scenes[next_scene].brightness_pct }}"
                       color_temp_kelvin: "{{ scenes[next_scene].color_temp_kelvin }}"
-                      transition: 1.5
+                      transition: 0.5
+                  - delay: "00:00:00.5"
+                  - service: light.turn_on
+                    target:
+                      entity_id: !input light_target
+                    data:
+                      brightness_pct: "{{ scenes[next_scene].brightness_pct }}"
+                      transition: 0.5
