@@ -1,25 +1,25 @@
 blueprint:
   name: Hue Dimmer - Scene & Brightness Control
   description: >-
-    Control a dimmable light (or group) with a Philips Hue Dimmer Switch V2
-    paired via zigbee2mqtt.
+    Control a dimmable light (or group) with a Philips Hue Dimmer Switch
+    (V1 or V2) paired via zigbee2mqtt. Supports both White Ambiance bulbs
+    (via z2m scene_recall) and color bulbs (via HA light.turn_on).
 
     Behavior:
-    - Top (On) button: toggle light on/off (restores previous state)
+    - Top (On) button: toggle light on/off
     - Dim up (+): increase brightness by 10 percentage points
     - Dim down (-): decrease brightness by 10 percentage points
-    - Bottom (Off) button: cycle through 5 scenes via z2m scene_recall
-      (concentrate → bright → relax → dimmed → nightlight → concentrate …)
+    - Bottom (Off) button: cycle through 5 scenes
+      (concentrate → bright → relax → dimmed → nightlight → …)
       If no bottom-press for the timer's duration, cycle resets to concentrate.
 
-    Scenes must be pre-created on the z2m group/bulb using the
-    sync_zigbee2mqtt_scenes script, with these IDs:
-      1=concentrate, 2=bright, 3=relax, 4=dimmed, 5=nightlight
-
-    Requires:
-    - An input_select helper with options:
-      concentrate, bright, relax, dimmed, nightlight
-    - A timer helper (suggested duration: 10 seconds)
+    Two bulb modes:
+    - 'white': sends z2m scene_recall to the group's MQTT topic (smooth,
+      bulb-native transitions). Requires scenes pre-created via the
+      sync_zigbee2mqtt_scenes script. Use for White Ambiance bulbs.
+    - 'color': calls HA light.turn_on with explicit brightness/color_temp
+      values. Works on any bulb including color bulbs where scene_recall
+      is unreliable. Scene values hardcoded in this blueprint.
   domain: automation
   source_url: https://github.com/isama92/ha-blueprints/blob/main/hue_dimmer_scene_control.yaml
   input:
@@ -32,18 +32,10 @@ blueprint:
         text:
     light_target:
       name: Light or light group
-      description: The light (or z2m group) this dimmer controls (used for toggle and dim +/-).
+      description: The light (or z2m group) this dimmer controls.
       selector:
         entity:
           domain: light
-    scene_topic:
-      name: z2m scene topic base
-      description: >-
-        MQTT topic base for the group/bulb that holds the scenes,
-        e.g. "zigbee2mqtt/office_ceiling" (no /set suffix).
-      default: "zigbee2mqtt/"
-      selector:
-        text:
     scene_helper:
       name: Scene selector helper
       description: >-
@@ -60,6 +52,28 @@ blueprint:
       selector:
         entity:
           domain: timer
+    bulb_type:
+      name: Bulb type
+      description: >-
+        'white' uses z2m scene_recall (requires sync script to have created
+        scenes on the bulbs). 'color' uses HA light.turn_on directly (reliable
+        on color bulbs where scene_recall is flaky).
+      default: white
+      selector:
+        select:
+          options:
+            - label: White Ambiance (scene_recall)
+              value: white
+            - label: Color (light.turn_on)
+              value: color
+    scene_topic:
+      name: z2m scene topic base (white bulbs only)
+      description: >-
+        For 'white' bulb_type only. MQTT topic base for the group/bulb,
+        e.g. "zigbee2mqtt/office_ceiling" (no /set suffix). Ignored for color.
+      default: "zigbee2mqtt/"
+      selector:
+        text:
 
 mode: restart
 max_exceeded: silent
@@ -68,13 +82,31 @@ variables:
   scene_helper_entity: !input scene_helper
   cycle_timer_entity: !input cycle_timer
   scene_base_topic: !input scene_topic
-  # Scene name → z2m scene ID mapping (must match sync_zigbee2mqtt_scenes script)
+  bulb_type_value: !input bulb_type
+  # Scene ID mapping (for white bulbs via scene_recall)
   scene_ids:
     concentrate: 1
     bright: 2
     relax: 3
     dimmed: 4
     nightlight: 5
+  # Scene values (for color bulbs via light.turn_on)
+  scenes:
+    concentrate:
+      brightness_pct: 100
+      color_temp_kelvin: 4291
+    bright:
+      brightness_pct: 100
+      color_temp_kelvin: 2700
+    relax:
+      brightness_pct: 20
+      color_temp_kelvin: 2237
+    dimmed:
+      brightness_pct: 25
+      color_temp_kelvin: 2700
+    nightlight:
+      brightness_pct: 8
+      color_temp_kelvin: 2700
 
 trigger:
   - platform: mqtt
@@ -139,7 +171,7 @@ action:
               brightness_step_pct: -10
               transition: 0.3
 
-      # ── Bottom button: cycle to next scene via z2m scene_recall ───────
+      # ── Bottom button: cycle to next scene ───────────────
       - conditions:
           - condition: trigger
             id: scene_cycle
@@ -160,7 +192,6 @@ action:
                   {% set idx = scene_order.index(current) %}
                   {{ scene_order[(idx + 1) % (scene_order | count)] }}
                 {% endif %}
-              next_scene_id: "{{ scene_ids[next_scene] }}"
           - service: timer.start
             target:
               entity_id: !input cycle_timer
@@ -169,7 +200,24 @@ action:
               entity_id: !input scene_helper
             data:
               option: "{{ next_scene }}"
-          - service: mqtt.publish
-            data:
-              topic: "{{ scene_base_topic }}/set"
-              payload: '{"scene_recall": {{ next_scene_id }}}'
+          - choose:
+              # white bulbs → scene_recall
+              - conditions:
+                  - "{{ bulb_type_value == 'white' }}"
+                sequence:
+                  - service: mqtt.publish
+                    data:
+                      topic: "{{ scene_base_topic }}/set"
+                      payload: >-
+                        {"scene_recall": {{ scene_ids[next_scene] }}}
+              # color bulbs → light.turn_on with explicit values
+              - conditions:
+                  - "{{ bulb_type_value == 'color' }}"
+                sequence:
+                  - service: light.turn_on
+                    target:
+                      entity_id: !input light_target
+                    data:
+                      brightness_pct: "{{ scenes[next_scene].brightness_pct }}"
+                      color_temp_kelvin: "{{ scenes[next_scene].color_temp_kelvin }}"
+                      transition: 1.5
