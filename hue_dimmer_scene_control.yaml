@@ -64,7 +64,6 @@ variables:
   scene_helper_entity: !input scene_helper
   cycle_timer_entity: !input cycle_timer
   scene_base_topic: !input scene_topic
-  light_entity: !input light_target
   # Scene ID mapping (z2m scene_recall)
   scene_ids:
     concentrate: 1
@@ -137,8 +136,8 @@ action:
               transition: 0.3
 
       # ── Bottom button: cycle to next scene ───────────────
-      # If light is off OR cycle timer idle, jumps to first scene.
-      # scene_recall turns the light on automatically when it's off.
+      # Timer state alone decides: idle → concentrate, active → advance.
+      # If light is off, turn it on first (scene_recall alone won't wake it).
       - conditions:
           - condition: trigger
             id: scene_cycle
@@ -152,9 +151,8 @@ action:
                 - nightlight
               current: "{{ states(scene_helper_entity) }}"
               timer_active: "{{ is_state(cycle_timer_entity, 'active') }}"
-              light_is_on: "{{ is_state(light_entity, 'on') }}"
               next_scene: >-
-                {% if not light_is_on or not timer_active or current not in scene_order %}
+                {% if not timer_active or current not in scene_order %}
                   concentrate
                 {% else %}
                   {% set idx = scene_order.index(current) %}
@@ -168,6 +166,17 @@ action:
               entity_id: !input scene_helper
             data:
               option: "{{ next_scene }}"
+          # Wake the light first if it's off — scene_recall doesn't turn on an off bulb
+          - if:
+              - condition: state
+                entity_id: !input light_target
+                state: "off"
+            then:
+              - service: light.turn_on
+                target:
+                  entity_id: !input light_target
+              - delay:
+                  milliseconds: 200
           - service: mqtt.publish
             data:
               topic: "{{ scene_base_topic }}/set"
