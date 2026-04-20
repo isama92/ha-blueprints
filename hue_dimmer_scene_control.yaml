@@ -2,8 +2,7 @@ blueprint:
   name: Hue Dimmer - Scene & Brightness Control
   description: >-
     Control a dimmable light (or group) with a Philips Hue Dimmer Switch
-    (V1 or V2) paired via zigbee2mqtt. Supports both White Ambiance bulbs
-    (via z2m scene_recall) and color bulbs (via HA light.turn_on).
+    (V1 or V2) paired via zigbee2mqtt, using z2m scene_recall for scenes.
 
     Behavior:
     - Top (On) button: toggle light on/off
@@ -11,15 +10,12 @@ blueprint:
     - Dim down (-): decrease brightness by 10 percentage points
     - Bottom (Off) button: cycle through 5 scenes
       (concentrate → bright → relax → dimmed → nightlight → …)
+      If the light is off, press turns it on at concentrate (scene 1).
       If no bottom-press for the timer's duration, cycle resets to concentrate.
 
-    Two bulb modes:
-    - 'white': sends z2m scene_recall to the group's MQTT topic (smooth,
-      bulb-native transitions). Requires scenes pre-created via the
-      sync_zigbee2mqtt_scenes script. Use for White Ambiance bulbs.
-    - 'color': calls HA light.turn_on with explicit brightness/color_temp
-      values. Works on any bulb including color bulbs where scene_recall
-      is unreliable. Scene values hardcoded in this blueprint.
+    Requires scenes pre-created on the target bulbs/group via the
+    sync_zigbee2mqtt_scenes script. Bulbs must support z2m scene_recall
+    (Hue White Ambiance GU10/E14 and similar scene-capable bulbs).
   domain: automation
   source_url: https://github.com/isama92/ha-blueprints/blob/main/hue_dimmer_scene_control.yaml
   input:
@@ -52,25 +48,11 @@ blueprint:
       selector:
         entity:
           domain: timer
-    bulb_type:
-      name: Bulb type
-      description: >-
-        'white' uses z2m scene_recall (requires sync script to have created
-        scenes on the bulbs). 'color' uses HA light.turn_on directly (reliable
-        on color bulbs where scene_recall is flaky).
-      default: white
-      selector:
-        select:
-          options:
-            - label: White Ambiance (scene_recall)
-              value: white
-            - label: Color (light.turn_on)
-              value: color
     scene_topic:
-      name: z2m scene topic base (white bulbs only)
+      name: z2m scene topic base
       description: >-
-        For 'white' bulb_type only. MQTT topic base for the group/bulb,
-        e.g. "zigbee2mqtt/office_ceiling" (no /set suffix). Ignored for color.
+        MQTT topic base for the group/bulb,
+        e.g. "zigbee2mqtt/office_ceiling" (no /set suffix).
       default: "zigbee2mqtt/"
       selector:
         text:
@@ -82,31 +64,14 @@ variables:
   scene_helper_entity: !input scene_helper
   cycle_timer_entity: !input cycle_timer
   scene_base_topic: !input scene_topic
-  bulb_type_value: !input bulb_type
-  # Scene ID mapping (for white bulbs via scene_recall)
+  light_entity: !input light_target
+  # Scene ID mapping (z2m scene_recall)
   scene_ids:
     concentrate: 1
     bright: 2
     relax: 3
     dimmed: 4
     nightlight: 5
-  # Scene values (for color bulbs via light.turn_on)
-  scenes:
-    concentrate:
-      brightness_pct: 100
-      color_temp_kelvin: 4291
-    bright:
-      brightness_pct: 100
-      color_temp_kelvin: 2700
-    relax:
-      brightness_pct: 20
-      color_temp_kelvin: 2237
-    dimmed:
-      brightness_pct: 25
-      color_temp_kelvin: 2700
-    nightlight:
-      brightness_pct: 8
-      color_temp_kelvin: 2700
 
 trigger:
   - platform: mqtt
@@ -172,6 +137,8 @@ action:
               transition: 0.3
 
       # ── Bottom button: cycle to next scene ───────────────
+      # If light is off OR cycle timer idle, jumps to first scene.
+      # scene_recall turns the light on automatically when it's off.
       - conditions:
           - condition: trigger
             id: scene_cycle
@@ -185,8 +152,9 @@ action:
                 - nightlight
               current: "{{ states(scene_helper_entity) }}"
               timer_active: "{{ is_state(cycle_timer_entity, 'active') }}"
+              light_is_on: "{{ is_state(light_entity, 'on') }}"
               next_scene: >-
-                {% if not timer_active or current not in scene_order %}
+                {% if not light_is_on or not timer_active or current not in scene_order %}
                   concentrate
                 {% else %}
                   {% set idx = scene_order.index(current) %}
@@ -200,32 +168,8 @@ action:
               entity_id: !input scene_helper
             data:
               option: "{{ next_scene }}"
-          - choose:
-              # white bulbs → scene_recall
-              - conditions:
-                  - "{{ bulb_type_value == 'white' }}"
-                sequence:
-                  - service: mqtt.publish
-                    data:
-                      topic: "{{ scene_base_topic }}/set"
-                      payload: >-
-                        {"scene_recall": {{ scene_ids[next_scene] }}}
-              # color bulbs → two-step light.turn_on to avoid green flash
-              # (changing color and brightness together makes the xy path pass
-              # through green; splitting into sequential steps avoids it)
-              - conditions:
-                  - "{{ bulb_type_value == 'color' }}"
-                sequence:
-                  - service: light.turn_on
-                    target:
-                      entity_id: !input light_target
-                    data:
-                      color_temp_kelvin: "{{ scenes[next_scene].color_temp_kelvin }}"
-                      transition: 0.5
-                  - delay: "00:00:00.5"
-                  - service: light.turn_on
-                    target:
-                      entity_id: !input light_target
-                    data:
-                      brightness_pct: "{{ scenes[next_scene].brightness_pct }}"
-                      transition: 0.5
+          - service: mqtt.publish
+            data:
+              topic: "{{ scene_base_topic }}/set"
+              payload: >-
+                {"scene_recall": {{ scene_ids[next_scene] }}}
