@@ -75,22 +75,22 @@ variables:
 trigger:
   - platform: mqtt
     topic: !input dimmer_topic
-    value_template: "{{ value_json.action }}"
+    value_template: "{{ value_json.action | default('') }}"
     payload: on_press
     id: top_toggle
   - platform: mqtt
     topic: !input dimmer_topic
-    value_template: "{{ value_json.action }}"
+    value_template: "{{ value_json.action | default('') }}"
     payload: up_press
     id: dim_up
   - platform: mqtt
     topic: !input dimmer_topic
-    value_template: "{{ value_json.action }}"
+    value_template: "{{ value_json.action | default('') }}"
     payload: down_press
     id: dim_down
   - platform: mqtt
     topic: !input dimmer_topic
-    value_template: "{{ value_json.action }}"
+    value_template: "{{ value_json.action | default('') }}"
     payload: off_press
     id: scene_cycle
 
