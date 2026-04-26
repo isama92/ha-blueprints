@@ -101,7 +101,7 @@ action:
           - condition: trigger
             id: top_toggle
         sequence:
-          - service: light.toggle
+          - action: light.toggle
             target:
               entity_id: !input light_target
 
@@ -113,7 +113,7 @@ action:
             entity_id: !input light_target
             state: "on"
         sequence:
-          - service: light.turn_on
+          - action: light.turn_on
             target:
               entity_id: !input light_target
             data:
@@ -128,7 +128,7 @@ action:
             entity_id: !input light_target
             state: "on"
         sequence:
-          - service: light.turn_on
+          - action: light.turn_on
             target:
               entity_id: !input light_target
             data:
@@ -158,10 +158,10 @@ action:
                   {% set idx = scene_order.index(current) %}
                   {{ scene_order[(idx + 1) % (scene_order | count)] }}
                 {% endif %}
-          - service: timer.start
+          - action: timer.start
             target:
               entity_id: !input cycle_timer
-          - service: input_select.select_option
+          - action: input_select.select_option
             target:
               entity_id: !input scene_helper
             data:
@@ -172,12 +172,12 @@ action:
                 entity_id: !input light_target
                 state: "off"
             then:
-              - service: light.turn_on
+              - action: light.turn_on
                 target:
                   entity_id: !input light_target
               - delay:
                   milliseconds: 200
-          - service: mqtt.publish
+          - action: mqtt.publish
             data:
               topic: "{{ scene_base_topic }}/set"
               payload: >-
