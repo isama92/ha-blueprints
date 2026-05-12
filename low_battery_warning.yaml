@@ -1,0 +1,89 @@
+blueprint:
+  name: Low Battery Warning
+  description: >-
+    Sends a notification via notify.ntfy_household when a percentage-based
+    battery sensor stays below a threshold for a sustained duration.
+
+    Behavior:
+    - Fires when the configured battery sensor drops below the threshold and
+      stays there for the sustained duration (to avoid spurious dips).
+    - Sends one ntfy notification with the current reading and a
+      caller-supplied replacement hint.
+    - mode: single, so it won't re-fire while the trigger is still active.
+
+    Requires:
+    - notify.ntfy_household (the household ntfy target).
+    - A sensor reporting battery percentage. Devices that expose unreliable
+      percentages (e.g. SNZB-01) should monitor voltage instead and not use
+      this blueprint.
+  domain: automation
+  source_url: https://github.com/isama92/ha-blueprints/blob/main/low_battery_warning.yaml
+  input:
+    battery_sensor:
+      name: Battery sensor
+      description: The battery-percentage sensor to monitor.
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+    device_label:
+      name: Device label
+      description: >-
+        Human-friendly device name in Title Case (e.g. "Toilet Sensor",
+        "Doorbell Button"). Used in the notification title and, lowercased,
+        in the message body.
+      selector:
+        text:
+    replacement_hint:
+      name: Replacement hint
+      description: >-
+        Sentence appended after the battery reading, telling the household
+        what to do (e.g. "Time to replace it." or "Replace the CR2032 in
+        the doorbell vibration sensor.").
+      default: Time to replace it.
+      selector:
+        text:
+    threshold:
+      name: Threshold (%)
+      description: Battery percentage at or below which the warning fires.
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 99
+          unit_of_measurement: '%'
+    duration_minutes:
+      name: Sustained duration (minutes)
+      description: >-
+        How long the sensor must stay below the threshold before notifying.
+        Prevents spurious notifications from brief dips.
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: min
+
+mode: single
+
+variables:
+  battery_sensor_entity: !input battery_sensor
+  device_label: !input device_label
+  replacement_hint: !input replacement_hint
+
+trigger:
+- trigger: numeric_state
+  entity_id: !input battery_sensor
+  below: !input threshold
+  for:
+    minutes: !input duration_minutes
+
+action:
+- action: notify.send_message
+  target:
+    entity_id: notify.ntfy_household
+  data:
+    title: "{{ device_label }} Battery Low"
+    message: >-
+      The {{ device_label | lower }} battery is low
+      ({{ states(battery_sensor_entity) }}%). {{ replacement_hint }}
